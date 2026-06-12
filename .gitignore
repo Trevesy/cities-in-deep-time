@@ -2,8 +2,6 @@
 # Regenerate with: python3 fetch_coastlines.py --step 1 --resume
 coastline_paths/
 
-# Web-export subset — generated on demand before deployment
-coastline_paths_5ma/
 
 # macOS noise
 .DS_Store
