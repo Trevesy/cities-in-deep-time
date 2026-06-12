@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Cities in Deep Time</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: #0a1628; overflow: hidden; }
+    #map { width: 100%; height: 100%; }
+
+    .ocean          { fill: #2980b9; }
+    .graticule      { fill: none; stroke: rgba(255,255,255,0.08); stroke-width: 0.25; }
+    .sphere-outline { fill: none; stroke: rgba(255,255,255,0.25); stroke-width: 1; }
+
+    /* Animated paleo-continent fill — green, no outline */
+    .paleo-land { fill: #4a7c59; stroke: none; }
+
+    /* Modern coastline — dotted white reference overlay */
+    .modern-coast {
+      fill: none;
+      stroke: rgba(255,255,255,0.45);
+      stroke-width: 0.9;
+      stroke-dasharray: 2 4;
+    }
+
+    /* Geographic reference lines */
+    .ref-line { fill: none; stroke: rgba(210,210,210,0.45); stroke-width: 0.7; }
+
+    /* Ancient supercontinent labels */
+    .continent-label {
+      font-family: sans-serif;
+      font-variant: small-caps;
+      font-size: 13px;
+      letter-spacing: 1.1em;
+      text-anchor: middle;
+      dominant-baseline: middle;
+      fill: rgba(255,255,255,0.82);
+      pointer-events: none;
+      user-select: none;
+    }
+
+    .track     { fill: none; stroke: #c8c8a0; stroke-width: 1.5; opacity: 0.75; transition: opacity 0.2s; }
+    .track.off { opacity: 0; }
+
+    #coast-loader {
+      position: fixed; top: 20px; left: 20px; z-index: 200;
+      background: rgba(10,14,20,0.88); backdrop-filter: blur(6px);
+      border: 1px solid rgba(255,255,255,0.08); border-radius: 8px;
+      padding: 8px 14px; font-family: 'Courier New', monospace;
+      font-size: 11px; color: #4fc3f7; display: none;
+    }
+
+    #controls {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      z-index: 100; background: rgba(10,14,20,0.92); backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,0.08); border-radius: 12px;
+      padding: 14px 24px; display: flex; align-items: center; gap: 16px; min-width: 480px;
+    }
+    .ctrl-lbl { font-family: 'Courier New', monospace; font-size: 11px; color: #666; white-space: nowrap; }
+    #time-slider { flex: 1; accent-color: #4fc3f7; cursor: pointer; }
+    #time-display {
+      font-family: 'Courier New', monospace; font-size: 14px;
+      font-weight: bold; color: #4fc3f7; min-width: 140px; text-align: center;
+    }
+
+    #legend {
+      position: fixed; top: 20px; right: 20px; z-index: 100;
+      background: rgba(10,14,20,0.92); backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,0.08); border-radius: 12px;
+      padding: 16px 18px; font-family: sans-serif; color: #ccc; font-size: 13px;
+      max-height: calc(100vh - 100px); overflow-y: auto;
+    }
+    #legend h3 {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 2px;
+      color: #555; margin-bottom: 12px; font-weight: normal;
+    }
+    .leg-group-title {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+      color: #444; margin: 10px 0 4px;
+    }
+    .leg-row { display: flex; align-items: center; gap: 7px; padding: 3px 0; cursor: pointer; user-select: none; }
+    .leg-row.dimmed { opacity: 0.25; }
+    .leg-swatch { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; border: 1.5px solid rgba(255,255,255,0.2); }
+    .leg-row input[type="checkbox"] { display: none; }
+    .leg-toggle {
+      width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0;
+      border: 2px solid #555; background: transparent;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .leg-row input[type="checkbox"]:checked + .leg-toggle { background: #4fc3f7; border-color: #4fc3f7; }
+  </style>
+</head>
+<body>
+  <svg id="map"></svg>
+  <div id="coast-loader">Loading coastlines…</div>
+
+  <div id="controls">
+    <span class="ctrl-lbl">Present</span>
+    <input type="range" id="time-slider" min="0" max="540" step="1" value="0">
+    <span class="ctrl-lbl">540 Ma</span>
+    <span id="time-display">Present day</span>
+  </div>
+
+  <div id="legend"><h3>Cities in Deep Time</h3></div>
+
+  <script src="d3.min.js"></script>
+  <script src="topojson.min.js"></script>
+  <script>
+  const COLORS = {
+    "London":        "#FF6B6B",
+    "Paris":         "#FF8C42",
+    "New York":      "#FFC857",
+    "Edinburgh":     "#4CC9F0",
+    "Moscow":        "#E0E0CC",
+    "Mexico City":   "#EE4266",
+    "Sydney":        "#3BCEAC",
+    "Wellington":    "#0EAD69",
+    "Brasilia":      "#68D89B",
+    "Buenos Aires":  "#9B89EC",
+    "Cape Town":     "#C77DFF",
+    "Delhi":         "#48CAE4",
+    "Rome":          "#F72585",
+    "Tokyo":         "#4361EE",
+    "San Francisco": "#A8DADC",
+    "Honolulu":      "#FFB703",
+  };
+
+  const GROUPS = [
+    { label: "Laurasia",
+      names: ["London","Paris","New York","Edinburgh","Moscow","Mexico City"] },
+    { label: "Gondwana",
+      names: ["Sydney","Wellington","Brasilia","Buenos Aires","Cape Town","Delhi"] },
+    { label: "Plate Boundaries / Oceanic",
+      names: ["Rome","Tokyo","San Francisco","Honolulu"] },
+  ];
+
+  // ── SVG + Equal Earth projection ──────────────────────────────────────
+  const W = window.innerWidth, H = window.innerHeight;
+  const svg = d3.select('#map').attr('width', W).attr('height', H);
+
+  const projection = d3.geoEqualEarth()
+    .fitExtent([[24, 44], [W - 24, H - 80]], { type: "Sphere" });
+  const geoPath = d3.geoPath().projection(projection);
+
+  // Layers — back to front
+  const gOcean       = svg.append('g');
+  const gGraticule   = svg.append('g');
+  const gSphere      = svg.append('g');
+  const gCoastlines  = svg.append('g');   // animated paleo-continents
+  const gModernCoast = svg.append('g');   // modern dotted coastline (fixed reference)
+  const gRefLines    = svg.append('g');   // equator, tropics, Greenwich meridian
+  const gContLabels  = svg.append('g');   // Gondwana / Pangea / Laurasia labels
+  const gTracks      = svg.append('g');
+  const gMarkers     = svg.append('g');
+
+  gOcean.append('path').datum({ type:"Sphere" }).attr('class','ocean').attr('d', geoPath);
+
+  // 20° graticule — half the default density
+  gGraticule.append('path')
+    .datum(d3.geoGraticule().step([20, 20])())
+    .attr('class','graticule').attr('d', geoPath);
+
+  gSphere.append('path').datum({ type:"Sphere" }).attr('class','sphere-outline').attr('d', geoPath);
+
+  // ── Geographic reference lines (fixed — drawn once) ───────────────────
+  (function drawRefLines() {
+    const TROPIC = 23.4365;   // degrees — Tropic of Cancer / Capricorn
+    const lons   = d3.range(-180, 181, 1);   // sample every degree for smooth curves
+    const lats   = d3.range(-90,   91, 1);
+
+    const lines = [
+      lons.map(lon => [lon,       0]),  // Equator
+      lons.map(lon => [lon,  TROPIC]),  // Tropic of Cancer
+      lons.map(lon => [lon, -TROPIC]),  // Tropic of Capricorn
+      lats.map(lat => [0,      lat]),   // Greenwich Meridian
+    ];
+
+    lines.forEach(coords => {
+      gRefLines.append('path')
+        .datum({ type: 'LineString', coordinates: coords })
+        .attr('class', 'ref-line')
+        .attr('d', geoPath);
+    });
+  })();
+
+  // ── Ancient continent labels ──────────────────────────────────────────
+  //
+  // Each entry has one or more {appear, fullIn, fullOut, gone} periods (all in Ma).
+  // "appear"  = oldest Ma shown (fading in as slider goes back)
+  // "fullIn"  = fully opaque from this Ma backwards
+  // "fullOut" = fully opaque up to this Ma forwards
+  // "gone"    = fully invisible below this Ma (too recent — already broken up)
+  //
+  // geo: [lon, lat] — approximate paleo-centroid used for label placement.
+
+  const CONT_DEFS = [
+    {
+      text: 'GONDWANA',
+      geo:  [18, -36],   // southern-hemisphere centroid
+      periods: [
+        { appear: 540, fullIn: 510, fullOut: 345, gone: 305 },  // early Gondwana (pre-Pangea)
+        { appear: 195, fullIn: 175, fullOut:  95, gone:  60 },  // post-Pangea Gondwana
+      ],
+    },
+    {
+      text: 'PANGEA',
+      geo:  [14, 4],     // equatorial centroid
+      periods: [
+        { appear: 345, fullIn: 305, fullOut: 210, gone: 175 },
+      ],
+    },
+    {
+      text: 'LAURASIA',
+      geo:  [22, 46],    // northern-hemisphere centroid
+      periods: [
+        { appear: 195, fullIn: 175, fullOut:  95, gone:  60 },
+      ],
+    },
+  ];
+
+  // Pre-compute screen coordinates from the projection
+  CONT_DEFS.forEach(d => {
+    const pt = projection(d.geo);
+    d.x = pt ? pt[0] : W / 2;
+    d.y = pt ? pt[1] : H / 2;
+  });
+
+  // Opacity ramp for a single period window
+  function periodOpacity(t, appear, fullIn, fullOut, gone) {
+    if (t < gone || t > appear) return 0;
+    if (t >= fullIn && t <= fullOut) return 1;
+    if (t > fullOut) return (appear - t) / (appear - fullOut);  // fading in (t increasing)
+    return (t - gone) / (fullIn - gone);                         // fading out (t decreasing)
+  }
+
+  function contOpacity(def, t) {
+    return Math.max(...def.periods.map(p =>
+      periodOpacity(t, p.appear, p.fullIn, p.fullOut, p.gone)));
+  }
+
+  let ancientLabelsOn = true;
+
+  const contLabelEls = CONT_DEFS.map(def =>
+    gContLabels.append('text')
+      .attr('class', 'continent-label')
+      .attr('x', def.x)
+      .attr('y', def.y)
+      .text(def.text)
+      .attr('opacity', 0)
+  );
+
+  function updateContLabels(t) {
+    CONT_DEFS.forEach((def, i) =>
+      contLabelEls[i].attr('opacity',
+        ancientLabelsOn ? contOpacity(def, t) : 0));
+  }
+
+  // ── Coastline cache & loading ─────────────────────────────────────────
+  const coastCache = new Map();
+  const loaderEl   = document.getElementById('coast-loader');
+  let   activeTime = 0;
+  let   debounce   = null;
+
+  async function getCoastlines(t) {
+    // Try exact time first (1 Ma files), then fall back to 5 Ma, then 10 Ma snaps
+    const keys = [...new Set([t, Math.round(t/5)*5, Math.round(t/10)*10])];
+
+    // Return from cache if already loaded
+    for (const key of keys) {
+      if (coastCache.has(key) && coastCache.get(key) !== null)
+        return coastCache.get(key);
+    }
+
+    // Try loading each key from local file
+    for (const key of keys) {
+      if (coastCache.get(key) === null) continue;   // known missing
+      const pad = String(key).padStart(4, '0');
+      try {
+        const data = await d3.json(`coastline_paths/coastlines_${pad}.json`);
+        coastCache.set(key, data);
+        if (data) return data;
+      } catch (_) { coastCache.set(key, null); }
+    }
+
+    // Live GPlates API fallback at 10 Ma snap
+    const key10 = Math.round(t / 10) * 10;
+    if (!coastCache.has(key10) || coastCache.get(key10) === null) {
+      try {
+        const r = await fetch(
+          `https://gws.gplates.org/reconstruct/coastlines/?time=${key10}&model=MERDITH2021`
+        );
+        if (r.ok) { const data = await r.json(); coastCache.set(key10, data); return data; }
+      } catch (_) { /* network unavailable */ }
+    }
+
+    return null;
+  }
+
+  function renderCoastlines(geojson) {
+    // Filter out oversized polygons — these are inverted ocean polygons
+    // (winding artefact from GPlates). Genuine land masses are always
+    // well under π steradians (~¼ of the sphere).
+    const features = (geojson?.features || []).filter(f => {
+      try { return d3.geoArea(f) < Math.PI; }
+      catch (_) { return false; }
+    });
+
+    gCoastlines.selectAll('path')
+      .data(features)
+      .join('path')
+      .attr('class', 'paleo-land')
+      .attr('d', geoPath);
+  }
+
+  function scheduleCoastUpdate(t) {
+    clearTimeout(debounce);
+    debounce = setTimeout(async () => {
+      activeTime = t;
+      if (!coastCache.has(t)) loaderEl.style.display = 'block';
+      const data = await getCoastlines(t);
+      loaderEl.style.display = 'none';
+      if (activeTime === t) renderCoastlines(data);
+    }, 60);
+  }
+
+  async function preloadAll() {
+    // Load every 1 Ma step — fills the cache so slider is instant
+    for (let t = 0; t <= 540; t += 1) {
+      if (!coastCache.has(t)) await getCoastlines(t);
+      await new Promise(r => setTimeout(r, 20));  // gentle pacing for local files
+    }
+  }
+
+  // ── City interpolation at 1 Ma resolution ────────────────────────────
+  function posAt(city, t) {
+    if (t > city.path_end_ma) return null;
+    const path = city.path;
+    if (!path || path.length === 0) return null;
+
+    let before = path[0], after = path[path.length - 1];
+    for (let i = 0; i < path.length; i++) {
+      if (path[i].time_ma <= t) before = path[i];
+      if (path[i].time_ma >= t) { after = path[i]; break; }
+    }
+
+    if (before.time_ma === after.time_ma) return before;
+    const frac = (t - before.time_ma) / (after.time_ma - before.time_ma);
+    return {
+      time_ma: t,
+      lon: before.lon + (after.lon - before.lon) * frac,
+      lat: before.lat + (after.lat - before.lat) * frac,
+    };
+  }
+
+  // ── City state — OFF by default ───────────────────────────────────────
+  const cityOn   = {};
+  const trackEl  = {};
+  const markerEl = {};
+  let   cities   = [];
+
+  function refreshCities(t) {
+    document.getElementById('time-display').textContent =
+      t === 0 ? 'Present day' : `${t} Ma ago`;
+
+    cities.forEach(city => {
+      const pos  = posAt(city, t);
+      const show = pos !== null && cityOn[city.name];
+      const m    = markerEl[city.name];
+      const row  = document.getElementById(`row-${city.name.replace(/\s+/g,'-')}`);
+
+      if (show) {
+        const projected = projection([pos.lon, pos.lat]);
+        if (projected) m.attr('cx', projected[0]).attr('cy', projected[1]).attr('opacity', 0.9);
+      } else {
+        m.attr('opacity', 0);
+      }
+      if (row) row.classList.toggle('dimmed', !cityOn[city.name] || pos === null);
+    });
+  }
+
+  function toggleCity(name, on) {
+    cityOn[name] = on;
+    if (trackEl[name]) trackEl[name].classed('off', !on);
+    refreshCities(+document.getElementById('time-slider').value);
+  }
+
+  function refresh(t) {
+    refreshCities(t);
+    scheduleCoastUpdate(t);
+    updateContLabels(t);
+  }
+
+  // ── Load data ─────────────────────────────────────────────────────────
+  Promise.all([
+    d3.json('countries-110m.json'),
+    d3.json('city_paths/all_cities.json'),
+  ]).then(([world, data]) => {
+    cities = data;
+
+    // Modern coastline — merged land outline, no country borders, dotted
+    gModernCoast.append('path')
+      .datum(topojson.feature(world, world.objects.land))
+      .attr('class', 'modern-coast')
+      .attr('d', geoPath);
+
+    // City tracks — hidden by default
+    data.forEach(city => {
+      cityOn[city.name] = false;   // OFF by default
+      trackEl[city.name] = gTracks.append('path')
+        .datum({ type:"Feature", geometry:{
+          type:"LineString",
+          coordinates: city.path.map(p => [p.lon, p.lat])
+        }})
+        .attr('class', 'track off')   // starts hidden
+        .attr('d', geoPath);
+    });
+
+    // City markers — hidden by default
+    data.forEach(city => {
+      const [x, y] = projection([city.modern_lon, city.modern_lat]);
+      const m = gMarkers.append('circle')
+        .attr('cx', x).attr('cy', y).attr('r', 7)
+        .attr('fill', COLORS[city.name] || '#aaa')
+        .attr('stroke', '#fff').attr('stroke-width', 1.5)
+        .attr('opacity', 0)   // starts hidden
+        .style('cursor','pointer');
+      m.append('title').text(city.name);
+      markerEl[city.name] = m;
+    });
+
+    // Legend — top section: map-layer toggles
+    const legend = document.getElementById('legend');
+
+    const layerTitle = document.createElement('div');
+    layerTitle.className = 'leg-group-title';
+    layerTitle.textContent = 'Map Layers';
+    legend.appendChild(layerTitle);
+
+    const acRow = document.createElement('label');
+    acRow.className = 'leg-row';
+    acRow.style.marginBottom = '6px';
+    acRow.innerHTML = `
+      <input type="checkbox" id="cb-ancient" checked>
+      <div class="leg-toggle" style="border-color:#8888aa;"></div>
+      <span>Ancient Continents</span>`;
+    acRow.querySelector('input').addEventListener('change', e => {
+      ancientLabelsOn = e.target.checked;
+      updateContLabels(+document.getElementById('time-slider').value);
+    });
+    legend.appendChild(acRow);
+
+    // City checkboxes
+    GROUPS.forEach(group => {
+      const gt = document.createElement('div');
+      gt.className = 'leg-group-title'; gt.textContent = group.label;
+      legend.appendChild(gt);
+      group.names.forEach(name => {
+        const lbl = document.createElement('label');
+        lbl.className = 'leg-row dimmed';   // starts dimmed
+        lbl.id = `row-${name.replace(/\s+/g,'-')}`;
+        lbl.innerHTML = `
+          <input type="checkbox">
+          <div class="leg-toggle"></div>
+          <div class="leg-swatch" style="background:${COLORS[name]||'#aaa'}"></div>
+          <span>${name}</span>`;
+        lbl.querySelector('input').addEventListener('change', e =>
+          toggleCity(name, e.target.checked));
+        legend.appendChild(lbl);
+      });
+    });
+
+    // Slider
+    document.getElementById('time-slider')
+      .addEventListener('input', e => refresh(+e.target.value));
+
+    // Initial render
+    refresh(0);
+    getCoastlines(0).then(data => {
+      renderCoastlines(data);
+      setTimeout(preloadAll, 1000);
+    });
+
+  }).catch(err => {
+    document.body.innerHTML = `
+      <div style="color:#f88;font-family:monospace;padding:40px;background:#0a1628;
+                  height:100vh;display:flex;align-items:center;justify-content:center;font-size:14px;">
+        <div><b>Error: ${err.message}</b><br><br>
+          Serve this folder with:<br><br>
+          &nbsp;&nbsp;python3 -m http.server 8000<br><br>
+          Then open <b>http://localhost:8000</b>
+        </div></div>`;
+  });
+  </script>
+</body>
+</html>

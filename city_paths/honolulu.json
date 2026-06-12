@@ -1,0 +1,57 @@
+{
+  "name": "Honolulu",
+  "group": "special",
+  "modern_lat": 21.307,
+  "modern_lon": -157.858,
+  "model": "MERDITH2021",
+  "time_step_ma": 10,
+  "path_end_ma": 80,
+  "step_count": 9,
+  "path": [
+    {
+      "time_ma": 0,
+      "lon": -157.858,
+      "lat": 21.307
+    },
+    {
+      "time_ma": 10,
+      "lon": -148.8853,
+      "lat": 21.9739
+    },
+    {
+      "time_ma": 20,
+      "lon": -140.3403,
+      "lat": 19.4392
+    },
+    {
+      "time_ma": 30,
+      "lon": -133.519,
+      "lat": 17.297
+    },
+    {
+      "time_ma": 40,
+      "lon": -128.5522,
+      "lat": 18.7128
+    },
+    {
+      "time_ma": 50,
+      "lon": -122.7847,
+      "lat": 15.9974
+    },
+    {
+      "time_ma": 60,
+      "lon": -120.0154,
+      "lat": 13.2217
+    },
+    {
+      "time_ma": 70,
+      "lon": -119.0008,
+      "lat": 10.0323
+    },
+    {
+      "time_ma": 80,
+      "lon": -114.8498,
+      "lat": 1.895
+    }
+  ]
+}
